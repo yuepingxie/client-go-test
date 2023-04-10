@@ -2,26 +2,15 @@ package main
 import (
 	"bufio"
 	"context"
-	// "flag"
 	"fmt"
 	"os"
-	// "path/filepath"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	// "k8s.io/client-go/util/homedir"
 	"k8s.io/client-go/util/retry"
-	//
-	// Uncomment to load all auth plugins
-	// _ "k8s.io/client-go/plugin/pkg/client/auth"
-	//
-	// Or uncomment to load specific auth plugins
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/azure"
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 )
 
 func main() {
@@ -86,18 +75,6 @@ func main() {
 	// Update Deployment
 	prompt()
 	fmt.Println("Updating deployment...")
-	//    You have two options to Update() this Deployment:
-	//
-	//    1. Modify the "deployment" variable and call: Update(deployment).
-	//       This works like the "kubectl replace" command and it overwrites/loses changes
-	//       made by other clients between you Create() and Update() the object.
-	//    2. Modify the "result" returned by Get() and retry Update(result) until
-	//       you no longer get a conflict error. This way, you can preserve changes made
-	//       by other clients between Create() and Update(). This is implemented below
-	//			 using the retry utility package included with client-go. (RECOMMENDED)
-	//
-	// More Info:
-	// https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
 
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
