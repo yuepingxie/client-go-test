@@ -1,4 +1,5 @@
 package main
+
 import (
 	"bufio"
 	"context"
@@ -15,36 +16,16 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/client-go/util/retry"
 
-	"k8s.io/client-go/kubernetes/typed/apps/v1"
-	
-
+	//"k8s.io/client-go/pkg/api/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
-
 func main() {
-	var kubeconfig *string
-	if home := homedir.HomeDir(); home != "" {
-		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	} else {
-		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-	}
-	flag.Parse()
+	deploymentName := "demo-deployment"
+	clientset := k8sClient()
 
-	deploymentName := "demo-deployment4"
+	//deploymentsClient := clientset.AppsV1().Deployments(apiv1.NamespaceDefault)
 
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
-	if err != nil {
-		panic(err)
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err)
-	}
-
-	deploymentsClient := clientset.AppsV1().Deployments(apiv1.NamespaceDefault)
-    fmt.Printf("Datatype of deploymentsClient : %T \n" , deploymentsClient)
-
-    
 	// Create Deployment
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -81,21 +62,33 @@ func main() {
 			},
 		},
 	}
-    fmt.Printf("Datatype of deployment : %T \n" , deployment)
-	createDeployment(deploymentsClient, deployment)
+
+	result, err1 := createDeployment(clientset, apiv1.NamespaceDefault, deployment)
+	if err1 != nil {
+		fmt.Println(err1)
+	}
+	fmt.Printf("Created deployment %q.\n", result.GetObjectMeta().GetName())
 
 	// Update Deployment
-	updateDeployment(deploymentsClient, deploymentName)
-
+	//updateDeployment(deploymentsClient, deploymentName)
 
 	// List Deployments
-	listDeployments(deploymentsClient)
+	deploymentList, err2 := listDeployments(clientset, apiv1.NamespaceDefault)
+	if err2 != nil {
+		fmt.Println(err2)
+	}
+	for _, deployment := range deploymentList.Items {
+		fmt.Printf("%+v\n", deployment.Name)
+	}
 
-	// watch deployments
-	watchDeployment(deploymentsClient)
+	// describe Deployment
+	//describeDeployment(deploymentsClient, deploymentName)
 
 	// Delete Deployment
-	deleteDeployment(deploymentsClient, deploymentName)
+	deleteDeployment(clientset, apiv1.NamespaceDefault, deploymentName)
+
+	// watch deployments
+	watchDeployment(clientset, apiv1.NamespaceDefault)
 }
 
 func prompt() {
@@ -112,30 +105,57 @@ func prompt() {
 
 func int32Ptr(i int32) *int32 { return &i }
 
-func createDeployment(deploymentsClient v1.DeploymentInterface, deployment *appsv1.Deployment) {
-	fmt.Println("Creating deployment...")
-	result, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{})
+// 获取集群内部k8s客户端
+func k8sClient() *kubernetes.Clientset {
+	fmt.Printf("get k8s client ...")
+	var kubeconfig *string
+	if home := homedir.HomeDir(); home != "" {
+		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
+	} else {
+		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
+	}
+	flag.Parse()
+
+	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Created deployment %q.\n", result.GetObjectMeta().GetName())
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err)
+	}
+
+	return clientset
 }
 
-func updateDeployment(deploymentsClient v1.DeploymentInterface, deploymentName string) {
+func createDeployment(clientSet *kubernetes.Clientset, namespaceName string, deployment *appsv1.Deployment) (result *appsv1.Deployment, err error) {
+	fmt.Println("Creating deployment...")
+	result, err = clientSet.AppsV1().Deployments(namespaceName).Create(context.TODO(), deployment, metav1.CreateOptions{})
+	fmt.Printf("type %T", result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, err
+
+}
+
+func updateDeployment(clientSet *kubernetes.Clientset, namespaceName string, deploymentName string) {
 	prompt()
 	fmt.Println("Updating deployment...")
 
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Retrieve the latest version of Deployment before attempting update
 		// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-		result, getErr := deploymentsClient.Get(context.TODO(), deploymentName, metav1.GetOptions{})
+		result, getErr := clientSet.AppsV1().Deployments(namespaceName).Get(context.TODO(), deploymentName, metav1.GetOptions{})
 		if getErr != nil {
 			panic(fmt.Errorf("Failed to get latest version of Deployment: %v", getErr))
 		}
 
 		result.Spec.Replicas = int32Ptr(1)                           // reduce replica count
 		result.Spec.Template.Spec.Containers[0].Image = "nginx:1.13" // change nginx version
-		_, updateErr := deploymentsClient.Update(context.TODO(), result, metav1.UpdateOptions{})
+		_, updateErr := clientSet.AppsV1().Deployments(namespaceName).Update(context.TODO(), result, metav1.UpdateOptions{})
 		return updateErr
 	})
 	if retryErr != nil {
@@ -144,44 +164,60 @@ func updateDeployment(deploymentsClient v1.DeploymentInterface, deploymentName s
 	fmt.Println("Updated deployment...")
 }
 
-func listDeployments(deploymentsClient v1.DeploymentInterface){
-    prompt()
-	fmt.Printf("Listing deployments in namespace %q:\n", apiv1.NamespaceDefault)
-	list, err := deploymentsClient.List(context.TODO(), metav1.ListOptions{})
+func listDeployments(clientSet *kubernetes.Clientset, namespaceName string) (deploymentList *appsv1.DeploymentList, err error) {
+	prompt()
+	fmt.Printf("Listing deployments in namespace %q:\n", namespaceName)
+	deploymentList, err = clientSet.AppsV1().Deployments(namespaceName).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return deploymentList, err
+}
+
+func describeDeployment(clientSet *kubernetes.Clientset, namespaceName string, deploymentName string) (deploymentInfo *appsv1.Deployment, err error) {
+	prompt()
+	deploymentInfo, err = clientSet.AppsV1().Deployments(namespaceName).Get(context.TODO(), deploymentName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	//fmt.Printf("the describsion of %s is %s", deploymentName, deploymentInfo)
+	return deploymentInfo, err
+}
+
+func watchDeployment(clientSet *kubernetes.Clientset, namespaceName string) {
+	prompt()
+	fmt.Printf("Watching deployments in namespace %q:\n", apiv1.NamespaceDefault)
+	watcher, err := clientSet.AppsV1().Deployments(namespaceName).Watch(context.TODO(), metav1.ListOptions{})
+
 	if err != nil {
 		panic(err)
 	}
-	for _, d := range list.Items {
-		fmt.Printf(" * %s (%d replicas)\n", d.Name, *d.Spec.Replicas)
+
+	for watchEvent := range watcher.ResultChan() {
+		deploy := watchEvent.Object.(*appsv1.Deployment)
+
+		switch watchEvent.Type {
+		case watch.Added:
+			fmt.Printf("Deployment %s/%s added, status %s", deploy.ObjectMeta.Namespace, deploy.ObjectMeta.Name)
+			fmt.Println()
+		case watch.Modified:
+			fmt.Printf("Deployment %s/%s modified", deploy.ObjectMeta.Namespace, deploy.ObjectMeta.Name)
+			fmt.Println()
+		case watch.Deleted:
+			fmt.Printf("Deployment %s/%s deleted", deploy.ObjectMeta.Namespace, deploy.ObjectMeta.Name)
+			fmt.Println()
+		}
 	}
+
 }
 
-func watchDeployment(deploymentsClient v1.DeploymentInterface){
-    prompt()
-	fmt.Printf("Watching deployments in namespace %q:\n", apiv1.NamespaceDefault)
-	w, _ := deploymentsClient.Watch(context.TODO(), metav1.ListOptions{})
-
-	// fmt.Printf(w)
-    for {
-        select {
-        case e, _ := <-w.ResultChan():
-			if e.Type == "ADDED" {
-				fmt.Printf("Deployment added")
-			} else if e.Type == "DELETE" {
-				fmt.Printf("Deployment deleted")
-			} else if e.Type == "UPDATE" {
-				fmt.Printf("Deployment changed")
-			}
-        }
-    }
-}
-
-func deleteDeployment(deploymentsClient v1.DeploymentInterface, deploymentName string){
+func deleteDeployment(clientSet *kubernetes.Clientset, namespaceName string, deploymentName string) {
 	prompt()
 	fmt.Println("Deleting deployment...")
-        deletePolicy := metav1.DeletePropagationForeground
+	deletePolicy := metav1.DeletePropagationForeground
 	fmt.Printf("Datatype of deletePolicy : %T \n", deletePolicy)
-        if err := deploymentsClient.Delete(context.TODO(), deploymentName , metav1.DeleteOptions{
+	if err := clientSet.AppsV1().Deployments(namespaceName).Delete(context.TODO(), deploymentName, metav1.DeleteOptions{
 		PropagationPolicy: &deletePolicy,
 	}); err != nil {
 		panic(err)
