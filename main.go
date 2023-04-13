@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/util/homedir"
 	"k8s.io/client-go/util/retry"
 
-	//"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/apimachinery/pkg/watch"
 )
 
@@ -85,7 +84,7 @@ func main() {
 	//describeDeployment(deploymentsClient, deploymentName)
 
 	// Delete Deployment
-	deleteDeployment(clientset, apiv1.NamespaceDefault, deploymentName)
+	//deleteDeployment(clientset, apiv1.NamespaceDefault, deploymentName)
 
 	// watch deployments
 	watchDeployment(clientset, apiv1.NamespaceDefault)
@@ -199,7 +198,7 @@ func watchDeployment(clientSet *kubernetes.Clientset, namespaceName string) {
 
 		switch watchEvent.Type {
 		case watch.Added:
-			fmt.Printf("Deployment %s/%s added, status %s", deploy.ObjectMeta.Namespace, deploy.ObjectMeta.Name)
+			fmt.Printf("Deployment %s/%s added", deploy.ObjectMeta.Namespace, deploy.ObjectMeta.Name)
 			fmt.Println()
 		case watch.Modified:
 			fmt.Printf("Deployment %s/%s modified", deploy.ObjectMeta.Namespace, deploy.ObjectMeta.Name)
